@@ -23,7 +23,7 @@ class ExampleChips extends StatelessWidget {
     '𑄞𑄫𑄝𑄧𑄚𑄴 𑄌𑄇𑄴𑄟',
     '𑄇 𑄈 𑄉 𑄊 𑄋',
     '𑄌𑄇𑄴𑄟 𑄞𑄥',
-    '𑄥𑄫𑄢𑄳𑄠𑄧',
+    '𑄥𑄫𑄢𑄴𑄡𑄧',
     '𑄚𑄧𑄟𑄧𑄥𑄴𑄇𑄢𑄧',
   ];
 

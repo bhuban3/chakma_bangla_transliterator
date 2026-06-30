@@ -6,6 +6,7 @@ import '../widgets/language_selector.dart';
 import '../widgets/text_input_card.dart';
 import '../widgets/output_card.dart';
 import '../widgets/example_chips.dart';
+import '../widgets/word_suggestions_card.dart';
 
 class TranslatorScreen extends StatefulWidget {
   const TranslatorScreen({super.key});
@@ -25,6 +26,12 @@ class _TranslatorScreenState extends State<TranslatorScreen>
   String _output = '';
   bool _loading = true;
   String? _error;
+
+  // ── Ambiguity state (Chakma -> Bengali only) ───────────────────────────
+  // Holds EVERY ambiguous segment found (স/শ/ষ, ড/ড়, ঢ/ঢ়, ঋ/রি, hasanta
+  // joined/separated, etc.) so the inline AmbiguitySuggestionsCard can let
+  // the user resolve all of them at once, right under the output.
+  TransliterationResult? _suggestionResult;
 
   late AnimationController _swapAnimCtrl;
 
@@ -54,11 +61,23 @@ class _TranslatorScreenState extends State<TranslatorScreen>
   void _onInputChanged() {
     final text = _inputController.text;
     if (text.isEmpty) {
-      setState(() => _output = '');
+      setState(() {
+        _output = '';
+        _suggestionResult = null;
+      });
       return;
     }
-    final result = _service.transliterate(text, _direction);
-    setState(() => _output = result);
+
+    // Use transliterateWithSuggestions instead of transliterate so we get
+    // every ambiguous segment (consonant collisions + hasanta) whenever
+    // direction is chakmaToBengali. For bengaliToChakma it returns no
+    // segments since that direction has no ambiguity.
+    final result = _service.transliterateWithSuggestions(text, _direction);
+
+    setState(() {
+      _suggestionResult = result;
+      _output = result.text; // default to the preferred/most-common choices
+    });
   }
 
   void _swapDirection() {
@@ -83,6 +102,7 @@ class _TranslatorScreenState extends State<TranslatorScreen>
     setState(() {
       _inputController.clear();
       _output = '';
+      _suggestionResult = null;
     });
   }
 
@@ -122,6 +142,14 @@ class _TranslatorScreenState extends State<TranslatorScreen>
     });
   }
 
+  /// Called whenever the user taps any option chip in
+  /// AmbiguitySuggestionsCard — updates the output immediately, no
+  /// confirm step needed since the card is inline, not a modal.
+  void _onSuggestionChoiceChanged(String value) {
+    HapticFeedback.selectionClick();
+    setState(() => _output = value);
+  }
+
   bool get _isBengaliToChakma =>
       _direction == TransliterationDirection.bengaliToChakma;
 
@@ -142,16 +170,16 @@ class _TranslatorScreenState extends State<TranslatorScreen>
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Text('𑄌𑄇𑄴𑄟', style: TextStyle(fontSize: 18)),
-            ),
+            // Container(
+            //   padding: const EdgeInsets.all(6),
+            //   decoration: BoxDecoration(
+            //     color: Colors.white.withOpacity(0.15),
+            //     borderRadius: BorderRadius.circular(10),
+            //   ),
+            //   child: const Text('𑄌𑄦𑄟', style: TextStyle(fontSize: 18)),
+            // ),
             const SizedBox(width: 10),
-            const Text('লিপি রূপান্তর'),
+            const Text('চাকমা ↔ বাংলা লিপি রূপান্তর'),
           ],
         ),
         actions: [
@@ -165,8 +193,8 @@ class _TranslatorScreenState extends State<TranslatorScreen>
       body: _loading
           ? _buildLoader()
           : _error != null
-              ? _buildError()
-              : _buildBody(),
+          ? _buildError()
+          : _buildBody(),
     );
   }
 
@@ -208,6 +236,13 @@ class _TranslatorScreenState extends State<TranslatorScreen>
   }
 
   Widget _buildBody() {
+    // Show the inline ambiguity card only when converting Chakma -> Bengali
+    // AND the service found at least one ambiguous segment (consonant
+    // collision and/or hasanta) in this output.
+    final showAmbiguityCard = !_isBengaliToChakma &&
+        _suggestionResult != null &&
+        _suggestionResult!.hasAmbiguity;
+
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: SingleChildScrollView(
@@ -246,6 +281,20 @@ class _TranslatorScreenState extends State<TranslatorScreen>
               onCopy: _copyOutput,
               mappingCount: _service.mappingCount,
             ),
+
+            // Ambiguity card — appears for ANY ambiguous letter (স/শ/ষ,
+            // ড/ড়, ঢ/ঢ়, ঋ/রি, hasanta joined/separated, etc.), all at once.
+            if (showAmbiguityCard)
+              // AmbiguitySuggestionsCard(
+              //   originalText: _suggestionResult!.text,
+              //   segments: _suggestionResult!.segments,
+              //   onChanged: _onSuggestionChoiceChanged,
+              // ),
+              WordSuggestionsCard(
+                variants: _suggestionResult!.wordVariants(),
+                selected: _output,
+                onSelected: _onSuggestionChoiceChanged,
+              )
           ],
         ),
       ),
@@ -289,7 +338,7 @@ class _TranslatorScreenState extends State<TranslatorScreen>
             const SizedBox(height: 12),
             Text(
               'এই অ্যাপটি চাকমা ও বাংলা লিপির মধ্যে স্ক্রিপ্ট-স্তরের রূপান্তর করে। '
-              'এটি শব্দ-স্তরের অনুবাদ নয় — উচ্চারণ একই থাকে, শুধু লিপি পরিবর্তন হয়।',
+                  'এটি শব্দ-স্তরের অনুবাদ নয় — উচ্চারণ একই থাকে, শুধু লিপি পরিবর্তন হয়।',
               style: const TextStyle(
                 fontSize: 14,
                 color: AppTheme.textSecondary,
@@ -314,19 +363,19 @@ class _TranslatorScreenState extends State<TranslatorScreen>
   }
 
   Widget _aboutRow(IconData icon, String text) => Row(
-        children: [
-          Icon(icon, size: 20, color: AppTheme.primary),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppTheme.textSecondary,
-                fontFamily: 'NotoSansBengali',
-              ),
-            ),
+    children: [
+      Icon(icon, size: 20, color: AppTheme.primary),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textSecondary,
+            fontFamily: 'NotoSansBengali',
           ),
-        ],
-      );
+        ),
+      ),
+    ],
+  );
 }
